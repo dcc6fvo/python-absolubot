@@ -1,9 +1,16 @@
+from distutils.log import INFO
 from os import system
+from classes.Absolubot import AbsoluBot
+from classes.LogConfig import LogConfig
+
 import sys
 import getopt
-from classes.absolubot import AbsoluBot
 
-def myfunc(argv):
+def init(argv):
+
+    log = LogConfig()
+    log.logger.info("Initializing...")
+   
     arg_timeout = ""
     arg_sleep = ""
     arg_output = ""
@@ -27,14 +34,12 @@ def myfunc(argv):
         elif opt in ("-o", "--output"):
             arg_output = arg
 
-    print('timeout:', arg_timeout)
-    print('sleep:', arg_sleep)
-    print('output:', arg_output)
+    log.logger.info("Parameters: timeout="+arg_timeout+" sleep="+arg_sleep+ " output="+arg_output)
 
-    bot = AbsoluBot(arg_timeout, arg_sleep, arg_output)
+    bot = AbsoluBot(arg_timeout,arg_sleep,arg_output,log)
     bot.downloadDrinksLinks()
     bot.start()
     sys.exit(0)
 
 if __name__ == "__main__":
-    myfunc(sys.argv)
+    init(sys.argv)

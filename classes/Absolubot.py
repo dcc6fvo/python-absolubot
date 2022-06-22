@@ -1,6 +1,9 @@
 from socket import timeout
 from selenium import webdriver
+from selenium.common.exceptions import WebDriverException
 from selenium.common.exceptions import NoSuchElementException
+from selenium.common.exceptions import ElementNotInteractableException
+from selenium.common.exceptions import ElementClickInterceptedException
 from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
@@ -8,28 +11,31 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
 from string import ascii_lowercase
 import time
+import subprocess
 import sys
 import os
 import time
 
 class AbsoluBot():
 
+	log=''
 	timeout=''
 	sleep=''
 	output=''
 
     #Init.. stop all chrome tasks if it exists
-	def __init__(self, arg1, arg2, arg3):
+	def __init__(self, arg1, arg2, arg3, arg4):
 
-		self.timeout=arg1
-		self.sleep=arg2
+		self.timeout=float(arg1)
+		self.sleep=float(arg2)
 		self.output=arg3
+		self.log=arg4
 
 		if (os.name == 'nt'):
-			cmd = 'taskkill /im chrome.exe /f'
+			self.doSomethingWithProcess(['chrome.exe','chromedriver.exe'],'taskkill /im /f')
 		else:
-			cmd = 'killall chrome && killall chromedriver'
-		os.system(cmd)
+			self.doSomethingWithProcess(['chrome','chromedriver'],'killall')
+		
 		self.browserProfile = self.build_chrome_options()
 		self.browserProfile.add_experimental_option('prefs', {'intl.accept_languages': 'en,en_US', 
 			'credentials_enable_service': 'false', 'profile.password_manager_enabled': 'false'})
@@ -64,58 +70,76 @@ class AbsoluBot():
 		chrome_options.add_argument("--start-maximized")
 		chrome_options.add_argument("--headless")
 		chrome_options.add_argument("--log-level=3")
+		chrome_options.add_argument('--blink-settings=imagesEnabled=false')
 
 		return chrome_options 
 
 	#Write all drinks links to a file called "drinks.txt"
 	def downloadDrinksLinks(self):
-		timeout = float(self.timeout)
+
+		timeout=self.timeout
+		sleep=self.sleep
+
 		drinks = []
 		count = 0
-		f = open('drinks.txt', 'w+')
-		
-		for c in ascii_lowercase:
 
-			self.browser.get('https://www.absolutdrinks.com/en/search/'+c)
-			#self.printCode('inicio')
-
-			try:
-				yearInput = EC.presence_of_element_located((By.NAME, "year"))
-				WebDriverWait(self.browser, timeout).until(yearInput)
-			except TimeoutException:
-				print("yearInput not found.")
-			finally:
-				yInput = self.browser.find_element(by=By.NAME, value="year")
-				yInput.send_keys('1986')
-				yInput.send_keys(Keys.ENTER)
-			
-			while True:
+		if( os.path.exists('links.txt') == False ):
+			self.log.logger.info('File links.txt doesn\'t  exists. Scraping the links to links.txt...')
+			f = open('links.txt', 'w+')
+			for c in ascii_lowercase:
 				try:
-					buttonLoadMore = EC.element_to_be_clickable((By.XPATH, "//button[text()='Load more']"))
-					WebDriverWait(self.browser, timeout).until(buttonLoadMore)
-					aDrinkList = self.browser.find_elements(by=By.XPATH, value="//section[contains(@class, 'drink-list')]//a[@href]")
-					for aelement in aDrinkList:
-						if aelement not in drinks:
-							drinks.append(aelement)
-							f.write(aelement.get_attribute('href'))
-							f.write('\n')
-							count = count + 1
-					
-					print(count)
-					self.browser.execute_script("arguments[0].click();", WebDriverWait(self.browser, 20).until(EC.element_to_be_clickable((By.XPATH, "//button[text()='Load more']"))))
-					#bLoadMore = self.browser.find_element(by=By.XPATH, value="")
-					#bLoadMore.click()
-					time.sleep(1)
+					self.browser.get('https://www.absolutdrinks.com/en/search/'+c)
+					#self.printCode('inicio')
+				except WebDriverException as webe: 
+					if 'ERR_INTERNET_DISCONNECTED' in webe.msg.upper():
+						self.log.logger.error("verify your conenction")
+					if 'ERR_NAME_NOT_RESOLVED' in webe.msg.upper():
+						self.log.logger.error("verify your DNS")
+					sys.exit(1)
+				
+				try:
+					WebDriverWait(self.browser, timeout).until(EC.presence_of_element_located((By.NAME, "year")))
+					self.browser.find_element(by=By.NAME, value="year").send_keys('1986')
 				except TimeoutException:
-					print("buttonLoadMore not found. finishing")
-					break
-		f.close()
+					self.log.logger.warning("yearInput not found.")
+				except ElementNotInteractableException:
+					self.log.logger.warning("yearInput not interactable")
+				
+				while True:
+					try:
+						buttonLoadMore = EC.element_to_be_clickable((By.XPATH, "//button[text()='Load more']"))
+						WebDriverWait(self.browser, timeout).until(buttonLoadMore)
+						aDrinkList = self.browser.find_elements(by=By.XPATH, value="//section[contains(@class, 'drink-list')]//a[@href]")
+						for aelement in aDrinkList:
+							if aelement not in drinks:
+								drinks.append(aelement)
+								f.write(aelement.get_attribute('href'))
+								f.write('\n')
+								count = count + 1
+
+						self.browser.execute_script("arguments[0].click();", WebDriverWait(self.browser, 20).until(EC.element_to_be_clickable((By.XPATH, "//button[text()='Load more']"))))
+						self.log.logger.warning("Found "+str(count)+" drinks recipes with letter "+c)
+						time.sleep(sleep)
+					except TimeoutException:
+						self.log.logger.info("buttonLoadMore not found. finishing the link collector.")
+						break
+			f.close()
+
+			# TODO
+			#Sorting the links file
+			self.doSomethingWithProcess(['links.txt > links.txt'],'sort')
+			#Removing /with/ recipes
+			#self.doSomethingWithProcess(['links.txt > links.txt'],'cat links2.txt | grep -v \'\/with\/\' > links.txt')
+
+		else:
+			self.log.logger.info('File links.txt already exists. Going on..')
+			pass
 	
-
 	#Algorithm start 
-	def start(self, timeout):
+	def start(self):
 
-		timeout=float(self.timeout)
+		timeout=self.timeout
+		sleep=self.sleep
 
 		self.browser.get('https://www.absolutdrinks.com/en/')
 
@@ -129,45 +153,51 @@ class AbsoluBot():
 			yInput.send_keys('1986')
 			yInput.send_keys(Keys.ENTER)
 
-		f = open('drinks.txt', 'r')
+		f = open('links.txt', 'r')
+		f2 = open(self.output, 'w+')
+
 		for line in f:
+			self.log.logger.info('Processing recipe: '+line.strip())
 			self.browser.get(line)
 
 			try:
-				buttonMakeDrink = EC.element_to_be_clickable((By.XPATH, "//button[text()='Make this drink']"))
-				WebDriverWait(self.browser, timeout).until(buttonMakeDrink)
-				bbuttonMakeDrink = self.browser.find_element(by=By.XPATH, value="//button[text()='Make this drink']")
-				bbuttonMakeDrink.click()
+				self.browser.execute_script("arguments[0].click();", WebDriverWait(self.browser, timeout).
+					until(EC.element_to_be_clickable((By.XPATH, "//button[text()='Make this drink']"))))
+						
 			except TimeoutException:
-				print("TimeoutException with buttonMakeDrink.")
+				self.log.logger.warning("TimeoutException with buttonMakeDrink.")
+			except ElementClickInterceptedException:
+				self.log.logger.warning("ElementClickInterceptedException")
 			except NoSuchElementException:
-				print("buttonMakeDrink not found.")
+				self.log.logger.warning("buttonMakeDrink not found.")
 				self.printCode('buttonMakeDrink-not-found.')
 				
-			time.sleep(1)
+			time.sleep(sleep)
 
 			try:
-				buttonML = EC.element_to_be_clickable((By.XPATH, "//button[@data-measurement='ml']"))
-				WebDriverWait(self.browser, timeout).until(buttonML)
-				bbuttonML = self.browser.find_element(by=By.XPATH, value="//button[@data-measurement='ml']")
-				bbuttonML.click()
+				self.browser.execute_script("arguments[0].click();", WebDriverWait(self.browser, timeout).
+					until(EC.element_to_be_clickable((By.XPATH, "//button[@data-measurement='ml']"))))
+					
 			except TimeoutException:
-				print("TimeoutException with buttonML.")
+				self.log.logger.warning("TimeoutException with buttonML.")
+			except ElementClickInterceptedException:
+				self.log.logger.warning("ElementClickInterceptedException")
 			except NoSuchElementException:
-				print("buttonML not found.")
+				self.log.logger.warning("buttonML not found.")
 				self.printCode('buttonML-not-found.')
 
-			time.sleep(1)
+			time.sleep(sleep)
 
 			try:
 				nome = self.browser.find_element(by=By.XPATH, value="//article[contains(@class, 'single-drink')]//h1")			
 			except NoSuchElementException:
 				print('page error: '+line)
 				self.printCode('nome-not-found')
-				continue
 
 			try:	
 				ingredientes = self.browser.find_element(by=By.XPATH, value="//article[contains(@class, 'single-drink')]//ul[@class='drink-recipe']")
+				ingredientes2 = ingredientes.text.replace('\n',',')
+
 			except NoSuchElementException:
 				self.printCode('ingredientes-not-found')
 
@@ -182,8 +212,11 @@ class AbsoluBot():
 			except NoSuchElementException:
 				self.printCode('receita-not-found')
 
-			task = (nome.text, '', ingredientes.text, ingredientesVirgula.text, receita.text)
-			print(task)
+			f2.write(self.removeNonAscii(nome.text)+';'+self.removeNonAscii(ingredientes2)+';'+self.removeNonAscii(ingredientesVirgula.text)+';'+self.removeNonAscii(receita.text))
+			f2.write('\n')
+
+		f2.close()
+		f.close()
 
 	def printCode(self,page):
 		html = self.browser.page_source
@@ -193,9 +226,11 @@ class AbsoluBot():
 		f.close()
 
 	def writeTextFile(self,texto):
-		f = open('drinks.txt', 'w+')
+		f = open(self.output, 'w+')
 		f.write(texto)
 		f.close()
+
+	def removeNonAscii(self, s): return "".join(i for i in s if ord(i)<126 and ord(i)>31)
 	
 	def get_first_nbr_from_str(self, input_str):
 		if not input_str and not isinstance(input_str, str):
@@ -208,6 +243,16 @@ class AbsoluBot():
 				break
 		return int(out_number)
 	
+
+	def doSomethingWithProcess(self, lista, comando):
+		for proc in lista:
+			p = subprocess.Popen([comando, proc], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+			response = p.wait()
+			if response==0:
+				self.log.logger.error(proc+" error..")
+			else:
+				self.log.logger.info(proc+" ok..")
+
 	def closeBrowser(self):
 		self.browser.close()
 	
